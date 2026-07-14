@@ -53,10 +53,10 @@ func ReadCurrentModelAssignmentsWithPresence(settingsPath string) (map[string]mo
 		SettingsPath: settingsPath,
 		IncludeEnv:   true,
 	})
-	if err != nil && len(effectiveConfig.Agent) == 0 {
-		return nil, false, err
-	}
 	if len(effectiveConfig.Agent) == 0 {
+		if err != nil {
+			return nil, false, err
+		}
 		return map[string]model.ModelAssignment{}, false, nil
 	}
 
