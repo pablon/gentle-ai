@@ -15,6 +15,10 @@ func TestRunCodeGraphInitValidatesCanonicalProjectAndPropagatesInitFailure(t *te
 	if err := os.Mkdir(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	canonicalRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	originalRoot := codeGraphGitTopLevel
 	originalInit := codeGraphInit
@@ -27,10 +31,10 @@ func TestRunCodeGraphInitValidatesCanonicalProjectAndPropagatesInitFailure(t *te
 		codeGraphTempDir = originalTemp
 	})
 	codeGraphGitTopLevel = func(path string) (string, error) {
-		if path != root {
-			t.Fatalf("git root path = %q, want %q", path, root)
+		if path != canonicalRoot {
+			t.Fatalf("git root path = %q, want %q", path, canonicalRoot)
 		}
-		return root, nil
+		return canonicalRoot, nil
 	}
 	codeGraphUserHomeDir = func() (string, error) { return filepath.Join(workspace, "home"), nil }
 	codeGraphTempDir = func() string { return filepath.Join(workspace, "temporary") }
@@ -44,10 +48,10 @@ func TestRunCodeGraphInitValidatesCanonicalProjectAndPropagatesInitFailure(t *te
 	if err := RunCodeGraph([]string{"init", "--cwd", root}, &output); err != nil {
 		t.Fatalf("RunCodeGraph() error = %v", err)
 	}
-	if got, want := strings.Join(called, " "), "codegraph init "+root; got != want {
+	if got, want := strings.Join(called, " "), "codegraph init "+canonicalRoot; got != want {
 		t.Fatalf("command = %q, want %q", got, want)
 	}
-	if !strings.Contains(output.String(), root) {
+	if !strings.Contains(output.String(), canonicalRoot) {
 		t.Fatalf("output = %q, want canonical root", output.String())
 	}
 
@@ -111,6 +115,10 @@ func TestRunCodeGraphInitAcceptsProjectBelowHome(t *testing.T) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	canonicalRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	originalRoot := codeGraphGitTopLevel
 	originalInit := codeGraphInit
@@ -128,7 +136,7 @@ func TestRunCodeGraphInitAcceptsProjectBelowHome(t *testing.T) {
 
 	called := false
 	codeGraphInit = func(name string, args ...string) error {
-		called = name == "codegraph" && len(args) == 2 && args[0] == "init" && args[1] == root
+		called = name == "codegraph" && len(args) == 2 && args[0] == "init" && args[1] == canonicalRoot
 		return nil
 	}
 	if err := RunCodeGraph([]string{"init", "--cwd", root}, &bytes.Buffer{}); err != nil {
