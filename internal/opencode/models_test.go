@@ -785,7 +785,7 @@ func TestLoadEffectiveConfigMergesDocumentedSourcesWithPrecedence(t *testing.T) 
 			t.Fatalf("missing merged shared model %q; got %v", modelID, shared.Models)
 		}
 	}
-	if got := effective.Agent["sdd-apply"]; got != (ConfigAgent{Model: "inline/apply", Variant: "max"}) {
+	if got := effective.Agent["sdd-apply"]; got != (ConfigAgent{Model: "inline/apply", Variant: "max", ModelSet: true}) {
 		t.Fatalf("sdd-apply = %+v, want inline override with variant", got)
 	}
 	if got := effective.Agent["sdd-verify"].Model; got != "global/verify" {

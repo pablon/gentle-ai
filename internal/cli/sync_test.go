@@ -3027,6 +3027,36 @@ func TestRunSyncPreservesCurrentOpenCodeAssignmentsOverStaleState(t *testing.T) 
 	}
 }
 
+func TestRunSyncPreservesEmptyCurrentOpenCodeAssignmentsOverStaleState(t *testing.T) {
+	home := t.TempDir()
+	setSyncTestHome(t, home)
+
+	configDir := filepath.Join(home, ".config", "opencode")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "opencode.json"), []byte(`{"provider":{},"agent":{"sdd-apply":{"model":""}}}`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if err := state.Write(home, state.InstallState{
+		InstalledAgents: []string{"opencode"},
+		ModelAssignments: map[string]state.ModelAssignmentState{
+			"sdd-apply": {ProviderID: "anthropic", ModelID: "stale-model"},
+		},
+	}); err != nil {
+		t.Fatalf("state.Write: %v", err)
+	}
+
+	result, err := RunSync([]string{"--agents", "opencode", "--sdd-mode", "single", "--dry-run"})
+	if err != nil {
+		t.Fatalf("RunSync() error = %v", err)
+	}
+
+	if got := len(result.Selection.ModelAssignments); got != 0 {
+		t.Fatalf("len(ModelAssignments) = %d, want 0; assignments=%+v", got, result.Selection.ModelAssignments)
+	}
+}
+
 // TestRunSyncDoesNotOverridePersistedAssignmentsOnSecondSync verifies the
 // full cycle: sync1 loads persisted assignments → sync2 still has them.
 // This is the core promise of the fix.

@@ -1177,8 +1177,8 @@ func PreserveCurrentOpenCodeModelAssignments(homeDir string, selection *model.Se
 		if settingsPath == "" {
 			return
 		}
-		current, err := sdd.ReadCurrentModelAssignments(settingsPath)
-		if err == nil && len(current) > 0 {
+		current, hasCurrentConfig, err := sdd.ReadCurrentModelAssignmentsWithPresence(settingsPath)
+		if err == nil && (len(current) > 0 || hasCurrentConfig) {
 			selection.ModelAssignments = current
 		}
 		return

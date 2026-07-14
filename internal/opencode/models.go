@@ -406,8 +406,30 @@ type ConfigProvider struct {
 
 // ConfigAgent represents only the agent fields Gentle AI needs to preserve.
 type ConfigAgent struct {
-	Model   string `json:"model"`
-	Variant string `json:"variant"`
+	Model    string `json:"model"`
+	Variant  string `json:"variant"`
+	ModelSet bool   `json:"-"`
+}
+
+func (a *ConfigAgent) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if modelRaw, ok := raw["model"]; ok {
+		a.ModelSet = true
+		if string(modelRaw) != "null" {
+			if err := json.Unmarshal(modelRaw, &a.Model); err != nil {
+				return err
+			}
+		}
+	}
+	if variantRaw, ok := raw["variant"]; ok && string(variantRaw) != "null" {
+		if err := json.Unmarshal(variantRaw, &a.Variant); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // EffectiveConfig contains the merged OpenCode config sections used by Gentle AI.

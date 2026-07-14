@@ -233,8 +233,9 @@ func nearestConfigRoot(workDir, homeDir string) string {
 
 func mergeConfigAgent(base ConfigAgent, override ConfigAgent) ConfigAgent {
 	merged := base
-	if override.Model != "" {
+	if override.ModelSet {
 		merged.Model = override.Model
+		merged.ModelSet = true
 	}
 	if override.Variant != "" {
 		merged.Variant = override.Variant

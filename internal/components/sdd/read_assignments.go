@@ -39,21 +39,35 @@ func ReadCurrentProfiles(settingsPath string) ([]model.Profile, error) {
 // Returns an empty map (no error) when the file does not exist, contains no
 // "agent" key, or has no matching phase agents with a valid model field.
 func ReadCurrentModelAssignments(settingsPath string) (map[string]model.ModelAssignment, error) {
+	assignments, _, err := ReadCurrentModelAssignmentsWithPresence(settingsPath)
+	return assignments, err
+}
+
+// ReadCurrentModelAssignmentsWithPresence reads current model assignments and
+// reports whether the effective OpenCode config contains any configurable agent
+// entry. The presence flag lets callers distinguish "no current assignment
+// config" from "current config explicitly contains configurable agents but no
+// valid model assignments".
+func ReadCurrentModelAssignmentsWithPresence(settingsPath string) (map[string]model.ModelAssignment, bool, error) {
 	effectiveConfig, err := opencode.LoadEffectiveConfig(opencode.ConfigLoadOptions{
 		SettingsPath: settingsPath,
 		IncludeEnv:   true,
 	})
 	if err != nil && len(effectiveConfig.Agent) == 0 {
-		return nil, err
+		return nil, false, err
 	}
 	if len(effectiveConfig.Agent) == 0 {
-		return map[string]model.ModelAssignment{}, nil
+		return map[string]model.ModelAssignment{}, false, nil
 	}
 
 	result := make(map[string]model.ModelAssignment)
+	hasConfigurableAgentConfig := false
 	for name, def := range effectiveConfig.Agent {
 		if !configurableAgentSet[name] {
 			continue
+		}
+		if def.ModelSet {
+			hasConfigurableAgentConfig = true
 		}
 		modelStr := def.Model
 		if modelStr == "" {
@@ -77,5 +91,5 @@ func ReadCurrentModelAssignments(settingsPath string) (map[string]model.ModelAss
 		}
 	}
 
-	return result, nil
+	return result, hasConfigurableAgentConfig, nil
 }
