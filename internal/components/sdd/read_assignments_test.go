@@ -153,6 +153,30 @@ func TestReadCurrentModelAssignmentsMergesSupportedFilesWithPrecedence(t *testin
 	}
 }
 
+func TestReadCurrentModelAssignmentsKeepsUsableAgentsWithParseWarning(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{
+		"agent": {"sdd-apply": {"model": "openai/gpt-4o"}}
+	}`), 0o644); err != nil {
+		t.Fatalf("write config.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(`{"agent":`), 0o644); err != nil {
+		t.Fatalf("write malformed opencode.json: %v", err)
+	}
+
+	got, err := ReadCurrentModelAssignments(filepath.Join(dir, "opencode.json"))
+	if err != nil {
+		t.Fatalf("ReadCurrentModelAssignments() error = %v", err)
+	}
+	assignment, ok := got["sdd-apply"]
+	if !ok {
+		t.Fatalf("sdd-apply assignment missing; got %v", got)
+	}
+	if assignment.ProviderID != "openai" || assignment.ModelID != "gpt-4o" {
+		t.Fatalf("sdd-apply assignment = %+v, want openai/gpt-4o", assignment)
+	}
+}
+
 func TestReadCurrentModelAssignmentsMapsLegacyOrchestratorToGentleOrchestrator(t *testing.T) {
 	dir := t.TempDir()
 	settingsPath := filepath.Join(dir, "opencode.json")

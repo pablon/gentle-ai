@@ -81,6 +81,7 @@ func DiscoverConfigFiles(opts ConfigLoadOptions) ([]ConfigFile, error) {
 	homeDir := opts.HomeDir
 	if homeDir == "" {
 		homeDir = inferHomeDirFromSettingsPath(opts.SettingsPath)
+		opts.HomeDir = homeDir
 	}
 	if homeDir != "" {
 		if err := addDir(filepath.Join(homeDir, ".config", "opencode")); err != nil {
@@ -92,15 +93,18 @@ func DiscoverConfigFiles(opts ConfigLoadOptions) ([]ConfigFile, error) {
 		if customPath := envLookup("OPENCODE_CONFIG"); customPath != "" {
 			file, err := readSingleConfigFile(customPath)
 			if err != nil {
-				return nil, err
-			}
-			key := file.Path
-			if abs, err := filepath.Abs(file.Path); err == nil {
-				key = abs
-			}
-			if !seen[key] {
-				seen[key] = true
-				files = append(files, file)
+				if !os.IsNotExist(err) {
+					return nil, err
+				}
+			} else {
+				key := file.Path
+				if abs, err := filepath.Abs(file.Path); err == nil {
+					key = abs
+				}
+				if !seen[key] {
+					seen[key] = true
+					files = append(files, file)
+				}
 			}
 		}
 	}

@@ -432,18 +432,20 @@ func LoadConfigProviders(path string) (map[string]ConfigProvider, error) {
 	}
 
 	merged := map[string]ConfigProvider{}
+	var parseErrs []error
 	for _, file := range files {
 		var raw struct {
 			Provider map[string]ConfigProvider `json:"provider"`
 		}
 		if err := json.Unmarshal(file.Data, &raw); err != nil {
-			return map[string]ConfigProvider{}, fmt.Errorf("parse opencode settings %q: %w", file.Path, err)
+			parseErrs = append(parseErrs, fmt.Errorf("parse opencode settings %q: %w", file.Path, err))
+			continue
 		}
 		for id, provider := range raw.Provider {
 			merged[id] = mergeConfigProvider(merged[id], provider)
 		}
 	}
-	return merged, nil
+	return merged, errors.Join(parseErrs...)
 }
 
 func mergeConfigProvider(base ConfigProvider, override ConfigProvider) ConfigProvider {
@@ -506,10 +508,6 @@ func MergeCustomProviders(providers map[string]Provider, config map[string]Confi
 	}
 
 	return merged
-}
-
-func stripJSONCComments(data []byte) []byte {
-	return sanitizeJSONC(data)
 }
 
 func sanitizeJSONC(data []byte) []byte {

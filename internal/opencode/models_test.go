@@ -680,6 +680,33 @@ func TestLoadConfigProvidersMergesAllFilesWithDeterministicPrecedence(t *testing
 	}
 }
 
+func TestLoadConfigProvidersKeepsValidProvidersWhenOneFileIsMalformed(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{
+		"provider": {"valid-before": {"name": "Valid Before", "models": {"before-model": {"name": "Before Model"}}}}
+	}`), 0o644); err != nil {
+		t.Fatalf("write config.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(`{"provider":`), 0o644); err != nil {
+		t.Fatalf("write malformed opencode.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "opencode.jsonc"), []byte(`{
+		"provider": {"valid-after": {"name": "Valid After", "models": {"after-model": {"name": "After Model"}}}}
+	}`), 0o644); err != nil {
+		t.Fatalf("write opencode.jsonc: %v", err)
+	}
+
+	config, err := LoadConfigProviders(filepath.Join(dir, "opencode.json"))
+	if err == nil {
+		t.Fatal("expected parse warning error for malformed config")
+	}
+	for _, id := range []string{"valid-before", "valid-after"} {
+		if _, ok := config[id]; !ok {
+			t.Fatalf("valid provider %q was discarded; got %v", id, config)
+		}
+	}
+}
+
 func TestLoadEffectiveConfigMergesDocumentedSourcesWithPrecedence(t *testing.T) {
 	t.Setenv("OPENCODE_CONFIG_CONTENT", `{
 		"provider": {
@@ -766,6 +793,32 @@ func TestLoadEffectiveConfigMergesDocumentedSourcesWithPrecedence(t *testing.T) 
 	}
 	if got := effective.Agent["sdd-spec"].Model; got != "custom/spec" {
 		t.Fatalf("sdd-spec model = %q, want custom/spec", got)
+	}
+}
+
+func TestLoadEffectiveConfigIgnoresMissingEnvConfig(t *testing.T) {
+	home := t.TempDir()
+	globalDir := filepath.Join(home, ".config", "opencode")
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatalf("mkdir global config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(globalDir, "opencode.json"), []byte(`{
+		"provider": {"global": {"name": "Global", "models": {"global-model": {"name": "Global Model"}}}}
+	}`), 0o644); err != nil {
+		t.Fatalf("write global config: %v", err)
+	}
+	t.Setenv("OPENCODE_CONFIG", filepath.Join(t.TempDir(), "missing.json"))
+
+	effective, err := LoadEffectiveConfig(ConfigLoadOptions{
+		HomeDir:      home,
+		SettingsPath: filepath.Join(globalDir, "opencode.json"),
+		IncludeEnv:   true,
+	})
+	if err != nil {
+		t.Fatalf("LoadEffectiveConfig() error = %v", err)
+	}
+	if _, ok := effective.Provider["global"]; !ok {
+		t.Fatalf("global provider was not discovered after missing OPENCODE_CONFIG; got %v", effective.Provider)
 	}
 }
 

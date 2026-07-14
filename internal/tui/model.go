@@ -2129,9 +2129,9 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 			m.Selection.SDDMode = options[m.Cursor]
 			if m.Selection.SDDMode == model.SDDModeMulti {
 				// SDDModeMulti: initialize ModelPicker explicitly and transition to it.
-				// pickerFlowSlice includes ScreenModelPicker only when SDDMode==Multi AND
-				// cache is present; we always show ModelPicker here (even cache-absent)
-				// because the user may have custom providers in opencode.json.
+				// pickerFlowSlice includes ScreenModelPicker whenever SDDMode==Multi,
+				// including when the cache is absent, because custom providers may exist
+				// in opencode.json.
 				m.ModelPicker = screens.NewModelPickerState(opencode.DefaultCachePath(), opencode.DefaultSettingsPath())
 				m.Selection.ModelAssignments = nil
 				m.setScreen(ScreenModelPicker)
@@ -2163,9 +2163,8 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			// Continue with OpenCode defaults when no providers are available yet.
-			// ScreenModelPicker may not be in the picker slice when the cache is absent
-			// (pickerFlowSlice gates ModelPicker on SDDMode==Multi AND cache present).
-			// Fall back to explicit predicate checks to find the correct next screen.
+			// pickerFlowSlice includes ScreenModelPicker whenever SDDMode==Multi, so
+			// fall back to explicit predicate checks to find the correct next screen.
 			if m.shouldShowStrictTDDScreen() {
 				m.setScreen(ScreenStrictTDD)
 			} else if m.Selection.Preset == model.PresetCustom {
@@ -2377,11 +2376,7 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 				if m.shouldShowStrictTDDScreen() {
 					m.setScreen(ScreenStrictTDD)
 				} else if m.shouldShowSDDModeScreen() {
-					if m.Selection.SDDMode == model.SDDModeMulti {
-						m.setScreen(ScreenModelPicker)
-					} else {
-						m.setScreen(ScreenSDDMode)
-					}
+					m.setScreen(m.sddModeBackScreen())
 				} else if m.shouldShowClaudeModelPickerScreen() {
 					m.setScreen(ScreenClaudeModelPicker)
 				} else {
@@ -2405,11 +2400,7 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 			} else if m.shouldShowStrictTDDScreen() {
 				m.setScreen(ScreenStrictTDD)
 			} else if m.shouldShowSDDModeScreen() {
-				if m.Selection.SDDMode == model.SDDModeMulti {
-					m.setScreen(ScreenModelPicker)
-				} else {
-					m.setScreen(ScreenSDDMode)
-				}
+				m.setScreen(m.sddModeBackScreen())
 			} else if m.shouldShowClaudeModelPickerScreen() {
 				m.setScreen(ScreenClaudeModelPicker)
 			} else {
@@ -3284,11 +3275,7 @@ func (m Model) goBack() Model {
 			if m.shouldShowStrictTDDScreen() {
 				m.setScreen(ScreenStrictTDD)
 			} else if m.shouldShowSDDModeScreen() {
-				if m.Selection.SDDMode == model.SDDModeMulti {
-					m.setScreen(ScreenModelPicker)
-				} else {
-					m.setScreen(ScreenSDDMode)
-				}
+				m.setScreen(m.sddModeBackScreen())
 			} else if m.shouldShowKiroModelPickerScreen() {
 				m.setScreen(ScreenKiroModelPicker)
 			} else if m.shouldShowClaudeModelPickerScreen() {
@@ -3390,11 +3377,7 @@ func (m Model) goBack() Model {
 			return m
 		}
 		if m.shouldShowSDDModeScreen() {
-			if m.Selection.SDDMode == model.SDDModeMulti {
-				m.setScreen(ScreenModelPicker)
-			} else {
-				m.setScreen(ScreenSDDMode)
-			}
+			m.setScreen(m.sddModeBackScreen())
 			return m
 		}
 		if m.shouldShowClaudeModelPickerScreen() {
@@ -4361,6 +4344,13 @@ func (m Model) pickerPreviousScreen() (Screen, bool) {
 		}
 	}
 	return 0, false
+}
+
+func (m Model) sddModeBackScreen() Screen {
+	if m.Selection.SDDMode == model.SDDModeMulti {
+		return ScreenModelPicker
+	}
+	return ScreenSDDMode
 }
 
 func (m *Model) advanceToNextPickerScreen(next Screen) {

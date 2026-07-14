@@ -597,12 +597,13 @@ func tuiSync(homeDir string) tui.SyncFunc {
 		agentIDs := syncAgentIDs(homeDir, overrides)
 		syncFlags := cli.SyncFlags{IncludePermissions: syncShouldIncludePermissions(agentIDs)}
 		selection := cli.BuildSyncSelection(syncFlags, agentIDs)
+		modelAssignmentsProvidedThisRun := overrides != nil && overrides.ModelAssignments != nil
 
 		// Load persisted model assignments so a plain sync (no overrides)
 		// preserves the user's previous choices instead of falling back
 		// to the "balanced" preset.
 		loadPersistedAssignments(homeDir, &selection)
-		if overrides == nil {
+		if !modelAssignmentsProvidedThisRun {
 			cli.PreserveCurrentOpenCodeModelAssignments(homeDir, &selection)
 		}
 

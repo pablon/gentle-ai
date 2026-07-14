@@ -2931,6 +2931,18 @@ func TestInjectOpenCodeMultiModePreservesProviderConfigWithCustomAssignment(t *t
 	if got := applyAgent["model"]; got != "lmstudio/local-model" {
 		t.Fatalf("sdd-apply model = %q, want lmstudio/local-model", got)
 	}
+
+	result, err := Inject(home, opencodeAdapter(), "multi", InjectOptions{OpenCodeModelAssignments: assignments})
+	if err != nil {
+		t.Fatalf("second Inject(multi, assignments) error = %v", err)
+	}
+	afterSecondInject, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("ReadFile(opencode.json) after second inject error = %v", err)
+	}
+	if result.Changed || !bytes.Equal(content, afterSecondInject) {
+		t.Fatalf("second Inject changed opencode.json: changed=%v", result.Changed)
+	}
 }
 
 func TestInjectOpenCodeMultiModeNoAssignmentsNoModel(t *testing.T) {

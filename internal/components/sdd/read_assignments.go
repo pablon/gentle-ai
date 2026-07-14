@@ -43,7 +43,7 @@ func ReadCurrentModelAssignments(settingsPath string) (map[string]model.ModelAss
 		SettingsPath: settingsPath,
 		IncludeEnv:   true,
 	})
-	if err != nil {
+	if err != nil && len(effectiveConfig.Agent) == 0 {
 		return nil, err
 	}
 	if len(effectiveConfig.Agent) == 0 {

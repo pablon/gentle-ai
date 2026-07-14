@@ -1293,6 +1293,7 @@ func RunSync(args []string) (SyncResult, error) {
 	agentIDs = unique(agentIDs)
 
 	selection := BuildSyncSelection(flags, agentIDs)
+	modelAssignmentsProvidedThisRun := selection.ModelAssignments != nil
 
 	// Read state once for both model-assignment restoration and persona resolution.
 	// On error (e.g. state.json absent), treat persisted values as empty — model
@@ -1336,7 +1337,7 @@ func RunSync(args []string) (SyncResult, error) {
 		}
 		selection.KiroModelAssignments = m
 	}
-	if len(selection.ModelAssignments) == 0 && len(persistedState.ModelAssignments) > 0 {
+	if !modelAssignmentsProvidedThisRun && len(selection.ModelAssignments) == 0 && len(persistedState.ModelAssignments) > 0 {
 		m := make(map[string]model.ModelAssignment, len(persistedState.ModelAssignments))
 		for k, v := range persistedState.ModelAssignments {
 			m[k] = model.ModelAssignment{ProviderID: v.ProviderID, ModelID: v.ModelID, Effort: v.Effort}
@@ -1368,7 +1369,9 @@ func RunSync(args []string) (SyncResult, error) {
 		}
 		selection.CodexPhaseModelAssignments = m
 	}
-	PreserveCurrentOpenCodeModelAssignments(homeDir, &selection)
+	if !modelAssignmentsProvidedThisRun {
+		PreserveCurrentOpenCodeModelAssignments(homeDir, &selection)
+	}
 
 	// Resolve persona from the already-read state. This covers both the dry-run
 	// branch (which returns early) and the normal path (which delegates to
