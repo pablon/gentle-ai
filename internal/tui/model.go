@@ -1991,12 +1991,7 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 			m.setScreen(ScreenClaudeModelPicker)
 		case 1: // Configure OpenCode models
 			m.ModelConfigMode = true
-			cachePath := opencode.DefaultCachePath()
-			if _, err := osStatModelCache(cachePath); err == nil {
-				m.ModelPicker = screens.NewModelPickerState(cachePath, opencode.DefaultSettingsPath())
-			} else {
-				m.ModelPicker = screens.ModelPickerState{}
-			}
+			m.ModelPicker = screens.NewModelPickerState(opencode.DefaultCachePath(), opencode.DefaultSettingsPath())
 			// Pre-populate with existing assignments from opencode.json.
 			// Only when there are no in-session assignments yet — the nil guard
 			// ensures we don't overwrite changes the user already made this session.
@@ -2383,12 +2378,7 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 					m.setScreen(ScreenStrictTDD)
 				} else if m.shouldShowSDDModeScreen() {
 					if m.Selection.SDDMode == model.SDDModeMulti {
-						cachePath := opencode.DefaultCachePath()
-						if _, err := osStatModelCache(cachePath); err == nil {
-							m.setScreen(ScreenModelPicker)
-						} else {
-							m.setScreen(ScreenSDDMode)
-						}
+						m.setScreen(ScreenModelPicker)
 					} else {
 						m.setScreen(ScreenSDDMode)
 					}
@@ -2416,12 +2406,7 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 				m.setScreen(ScreenStrictTDD)
 			} else if m.shouldShowSDDModeScreen() {
 				if m.Selection.SDDMode == model.SDDModeMulti {
-					cachePath := opencode.DefaultCachePath()
-					if _, err := osStatModelCache(cachePath); err == nil {
-						m.setScreen(ScreenModelPicker)
-					} else {
-						m.setScreen(ScreenSDDMode)
-					}
+					m.setScreen(ScreenModelPicker)
 				} else {
 					m.setScreen(ScreenSDDMode)
 				}
@@ -3300,12 +3285,7 @@ func (m Model) goBack() Model {
 				m.setScreen(ScreenStrictTDD)
 			} else if m.shouldShowSDDModeScreen() {
 				if m.Selection.SDDMode == model.SDDModeMulti {
-					cachePath := opencode.DefaultCachePath()
-					if _, err := osStatModelCache(cachePath); err == nil {
-						m.setScreen(ScreenModelPicker)
-					} else {
-						m.setScreen(ScreenSDDMode)
-					}
+					m.setScreen(ScreenModelPicker)
 				} else {
 					m.setScreen(ScreenSDDMode)
 				}
@@ -3411,12 +3391,7 @@ func (m Model) goBack() Model {
 		}
 		if m.shouldShowSDDModeScreen() {
 			if m.Selection.SDDMode == model.SDDModeMulti {
-				cachePath := opencode.DefaultCachePath()
-				if _, err := osStatModelCache(cachePath); err == nil {
-					m.setScreen(ScreenModelPicker)
-				} else {
-					m.setScreen(ScreenSDDMode)
-				}
+				m.setScreen(ScreenModelPicker)
 			} else {
 				m.setScreen(ScreenSDDMode)
 			}
@@ -4349,9 +4324,7 @@ func (m Model) pickerFlowSlice() []Screen {
 	if m.shouldShowSDDModeScreen() {
 		s = append(s, ScreenSDDMode)
 		if m.Selection.SDDMode == model.SDDModeMulti {
-			if _, err := osStatModelCache(opencode.DefaultCachePath()); err == nil {
-				s = append(s, ScreenModelPicker)
-			}
+			s = append(s, ScreenModelPicker)
 		}
 	}
 	if m.shouldShowStrictTDDScreen() {
@@ -4525,12 +4498,7 @@ func (m Model) handleProfileNameInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.ProfileDraft.Name = name
 		m.ProfileCreateStep = 1
 		// Initialize model picker for orchestrator step.
-		cachePath := opencode.DefaultCachePath()
-		if _, err := osStatModelCache(cachePath); err == nil {
-			m.ModelPicker = screens.NewModelPickerState(cachePath, opencode.DefaultSettingsPath())
-		} else {
-			m.ModelPicker = screens.ModelPickerState{}
-		}
+		m.ModelPicker = screens.NewModelPickerState(opencode.DefaultCachePath(), opencode.DefaultSettingsPath())
 		m.ModelPicker.ForProfile = true
 		m.Cursor = 0
 		return m, nil
@@ -4583,12 +4551,7 @@ func (m Model) confirmProfileCreate() (tea.Model, tea.Cmd) {
 		// Edit mode: step 0 shows read-only name, enter advances to step 1.
 		if m.ProfileEditMode {
 			m.ProfileCreateStep = 1
-			cachePath := opencode.DefaultCachePath()
-			if _, err := osStatModelCache(cachePath); err == nil {
-				m.ModelPicker = screens.NewModelPickerState(cachePath, opencode.DefaultSettingsPath())
-			} else {
-				m.ModelPicker = screens.ModelPickerState{}
-			}
+			m.ModelPicker = screens.NewModelPickerState(opencode.DefaultCachePath(), opencode.DefaultSettingsPath())
 			m.ModelPicker.ForProfile = true
 			m.Cursor = 0
 		}

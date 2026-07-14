@@ -549,6 +549,255 @@ func TestLoadConfigProviders(t *testing.T) {
 	}
 }
 
+func TestLoadConfigProvidersSupportedFallbackFilenamesAndJSONC(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.jsonc")
+	if err := os.WriteFile(path, []byte(`{
+		// Local OpenAI-compatible provider.
+		"provider": {
+			"lmstudio": {
+				"name": "LM Studio",
+				"models": {
+					"local-model": {"name": "Local Model"}, // simple documented shape
+				},
+			},
+		},
+	}`), 0o644); err != nil {
+		t.Fatalf("write config.jsonc: %v", err)
+	}
+
+	config, err := LoadConfigProviders(filepath.Join(dir, "opencode.json"))
+	if err != nil {
+		t.Fatalf("LoadConfigProviders() error = %v", err)
+	}
+	if got := config["lmstudio"].Models["local-model"].Name; got != "Local Model" {
+		t.Fatalf("model name = %q, want Local Model", got)
+	}
+}
+
+func TestLoadConfigProvidersKeepsCommasInsideStrings(t *testing.T) {
+	path := writeConfigFixture(t, `{
+		"provider": {
+			"local": {
+				"name": "Local, Provider",
+				"models": {
+					"model,with,commas": {"name": "Model, With, Commas"},
+				},
+			},
+		},
+	}`)
+
+	config, err := LoadConfigProviders(path)
+	if err != nil {
+		t.Fatalf("LoadConfigProviders() error = %v", err)
+	}
+	provider := config["local"]
+	if provider.Name != "Local, Provider" {
+		t.Fatalf("provider name = %q, want Local, Provider", provider.Name)
+	}
+	if got := provider.Models["model,with,commas"].Name; got != "Model, With, Commas" {
+		t.Fatalf("model name = %q, want Model, With, Commas", got)
+	}
+}
+
+func TestLoadConfigProvidersMergesConfigJSONWhenOpenCodeJSONExists(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{
+		"provider": {
+			"test-local-provider-1": {
+				"name": "Test Local Provider 1",
+				"models": {"neuro-model": {"name": "Neuro Model"}}
+			},
+			"test-local-provider-2": {
+				"name": "Test Local Provider 2",
+				"models": {"qwen-local": {"name": "Qwen Local"}}
+			}
+		}
+	}`), 0o644); err != nil {
+		t.Fatalf("write config.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(`{
+		"provider": {
+			"ollama": {
+				"name": "Ollama",
+				"models": {"llama-local": {"name": "Llama Local"}}
+			}
+		}
+	}`), 0o644); err != nil {
+		t.Fatalf("write opencode.json: %v", err)
+	}
+
+	config, err := LoadConfigProviders(filepath.Join(dir, "opencode.json"))
+	if err != nil {
+		t.Fatalf("LoadConfigProviders() error = %v", err)
+	}
+	for _, id := range []string{"test-local-provider-1", "test-local-provider-2", "ollama"} {
+		if _, ok := config[id]; !ok {
+			t.Fatalf("missing provider %q in merged config; got %v", id, config)
+		}
+	}
+}
+
+func TestLoadConfigProvidersMergesAllFilesWithDeterministicPrecedence(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"config.json": `{
+			"provider": {"shared": {"name": "config json", "models": {"shared-model": {"name": "config json model"}, "config-only": {"name": "config only"}}}}
+		}`,
+		"config.jsonc": `{
+			// JSONC overrides JSON in the legacy family.
+			"provider": {"shared": {"name": "config jsonc", "models": {"shared-model": {"name": "config jsonc model"}, "config-jsonc-only": {"name": "config jsonc only"}}}}
+		}`,
+		"opencode.json": `{
+			"provider": {"shared": {"name": "opencode json", "models": {"shared-model": {"name": "opencode json model"}, "opencode-only": {"name": "opencode only"}}}}
+		}`,
+		"opencode.jsonc": `{
+			// Final override.
+			"provider": {"shared": {"name": "opencode jsonc", "models": {"shared-model": {"name": "opencode jsonc model"}, "opencode-jsonc-only": {"name": "opencode jsonc only"}}}}
+		}`,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	config, err := LoadConfigProviders(filepath.Join(dir, "opencode.json"))
+	if err != nil {
+		t.Fatalf("LoadConfigProviders() error = %v", err)
+	}
+	shared := config["shared"]
+	if shared.Name != "opencode jsonc" {
+		t.Fatalf("shared provider name = %q, want opencode jsonc", shared.Name)
+	}
+	if got := shared.Models["shared-model"].Name; got != "opencode jsonc model" {
+		t.Fatalf("shared model name = %q, want opencode jsonc model", got)
+	}
+	for _, id := range []string{"config-only", "config-jsonc-only", "opencode-only", "opencode-jsonc-only"} {
+		if _, ok := shared.Models[id]; !ok {
+			t.Fatalf("missing merged model %q; got %v", id, shared.Models)
+		}
+	}
+}
+
+func TestLoadEffectiveConfigMergesDocumentedSourcesWithPrecedence(t *testing.T) {
+	t.Setenv("OPENCODE_CONFIG_CONTENT", `{
+		"provider": {
+			"shared": {"name": "inline", "models": {"inline-only": {"name": "Inline Only"}}}
+		},
+		"agent": {"sdd-apply": {"model": "inline/apply", "variant": "max"}}
+	}`)
+
+	home := t.TempDir()
+	globalDir := filepath.Join(home, ".config", "opencode")
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatalf("mkdir global config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(globalDir, "config.json"), []byte(`{
+		"provider": {
+			"legacy-global": {"name": "Legacy Global", "models": {"global-model": {"name": "Global Model"}}},
+			"shared": {"name": "global", "models": {"global-only": {"name": "Global Only"}}}
+		},
+		"agent": {"sdd-verify": {"model": "global/verify"}}
+	}`), 0o644); err != nil {
+		t.Fatalf("write global config: %v", err)
+	}
+
+	customPath := filepath.Join(t.TempDir(), "custom.jsonc")
+	if err := os.WriteFile(customPath, []byte(`{
+		// Custom config is loaded after global config.
+		"provider": {"custom-only": {"name": "Custom Only", "models": {"custom-model": {"name": "Custom Model"}}}},
+		"agent": {"sdd-spec": {"model": "custom/spec"}}
+	}`), 0o644); err != nil {
+		t.Fatalf("write custom config: %v", err)
+	}
+	t.Setenv("OPENCODE_CONFIG", customPath)
+
+	projectRoot := t.TempDir()
+	workDir := filepath.Join(projectRoot, "nested")
+	if err := os.MkdirAll(filepath.Join(workDir, ".opencode"), 0o755); err != nil {
+		t.Fatalf("mkdir project dirs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "opencode.jsonc"), []byte(`{
+		"provider": {
+			"project-only": {"name": "Project Only", "models": {"project-model": {"name": "Project Model"}}},
+			"shared": {"name": "project", "models": {"project-only-model": {"name": "Project Only Model"}}}
+		},
+		"agent": {"sdd-apply": {"model": "project/apply"}}
+	}`), 0o644); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, ".opencode", "opencode.json"), []byte(`{
+		"provider": {"dot-opencode-only": {"name": "Dot OpenCode", "models": {"dot-model": {"name": "Dot Model"}}}}
+	}`), 0o644); err != nil {
+		t.Fatalf("write .opencode config: %v", err)
+	}
+
+	effective, err := LoadEffectiveConfig(ConfigLoadOptions{
+		HomeDir:      home,
+		SettingsPath: filepath.Join(globalDir, "opencode.json"),
+		WorkDir:      workDir,
+		WorktreeRoot: projectRoot,
+		IncludeEnv:   true,
+	})
+	if err != nil {
+		t.Fatalf("LoadEffectiveConfig() error = %v", err)
+	}
+
+	for _, id := range []string{"legacy-global", "custom-only", "project-only", "dot-opencode-only", "shared"} {
+		if _, ok := effective.Provider[id]; !ok {
+			t.Fatalf("missing provider %q; got %v", id, effective.Provider)
+		}
+	}
+	shared := effective.Provider["shared"]
+	if shared.Name != "inline" {
+		t.Fatalf("shared provider name = %q, want inline", shared.Name)
+	}
+	for _, modelID := range []string{"global-only", "project-only-model", "inline-only"} {
+		if _, ok := shared.Models[modelID]; !ok {
+			t.Fatalf("missing merged shared model %q; got %v", modelID, shared.Models)
+		}
+	}
+	if got := effective.Agent["sdd-apply"]; got != (ConfigAgent{Model: "inline/apply", Variant: "max"}) {
+		t.Fatalf("sdd-apply = %+v, want inline override with variant", got)
+	}
+	if got := effective.Agent["sdd-verify"].Model; got != "global/verify" {
+		t.Fatalf("sdd-verify model = %q, want global/verify", got)
+	}
+	if got := effective.Agent["sdd-spec"].Model; got != "custom/spec" {
+		t.Fatalf("sdd-spec model = %q, want custom/spec", got)
+	}
+}
+
+func TestLoadEffectiveConfigKeepsValidSourcesWhenOneFileIsMalformed(t *testing.T) {
+	home := t.TempDir()
+	globalDir := filepath.Join(home, ".config", "opencode")
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatalf("mkdir global config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(globalDir, "config.json"), []byte(`{
+		"provider": {
+			"valid-global": {"name": "Valid Global", "models": {"global-model": {"name": "Global Model"}}}
+		}
+	}`), 0o644); err != nil {
+		t.Fatalf("write valid config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(globalDir, "opencode.json"), []byte(`{"provider":`), 0o644); err != nil {
+		t.Fatalf("write malformed config: %v", err)
+	}
+
+	effective, err := LoadEffectiveConfig(ConfigLoadOptions{
+		HomeDir:      home,
+		SettingsPath: filepath.Join(globalDir, "opencode.json"),
+	})
+	if err == nil {
+		t.Fatal("expected parse warning error for malformed config")
+	}
+	if _, ok := effective.Provider["valid-global"]; !ok {
+		t.Fatalf("valid provider was discarded; got %v", effective.Provider)
+	}
+}
+
 func TestLoadConfigProvidersMissingFile(t *testing.T) {
 	config, err := LoadConfigProviders("/nonexistent/opencode.json")
 	if err != nil {
@@ -650,7 +899,7 @@ func TestMergeCustomProvidersExistingProviderNewModel(t *testing.T) {
 	}
 }
 
-func TestMergeCustomProvidersDefaultsToolCallToFalse(t *testing.T) {
+func TestMergeCustomProvidersDefaultsToolCallToTrue(t *testing.T) {
 	providers := map[string]Provider{}
 	config := map[string]ConfigProvider{
 		"lmstudio": {Name: "LM Studio", Models: map[string]ConfigModel{
@@ -659,8 +908,8 @@ func TestMergeCustomProvidersDefaultsToolCallToFalse(t *testing.T) {
 	}
 
 	merged := MergeCustomProviders(providers, config)
-	if merged["lmstudio"].Models["qwen/qwen3.5"].ToolCall {
-		t.Fatal("custom model should default to ToolCall=false when omitted in config")
+	if !merged["lmstudio"].Models["qwen/qwen3.5"].ToolCall {
+		t.Fatal("custom model should default to ToolCall=true when omitted in config")
 	}
 }
 
@@ -775,12 +1024,12 @@ func TestDetectAvailableProvidersWithCustomIDs(t *testing.T) {
 	}
 }
 
-func TestDetectAvailableProvidersCustomStillNeedsToolCall(t *testing.T) {
-	path := writeFixture(t)
-	providers, err := LoadModels(path)
-	if err != nil {
-		t.Fatalf("LoadModels() error = %v", err)
-	}
+func TestDetectAvailableProvidersCustomProviderModelIsSelectableByDefault(t *testing.T) {
+	providers := MergeCustomProviders(map[string]Provider{}, map[string]ConfigProvider{
+		"lmstudio": {Name: "LM Studio", Models: map[string]ConfigModel{
+			"local-model": {Name: "Local Model"},
+		}},
+	})
 
 	cleanup := withNoAuth(t)
 	defer cleanup()
@@ -789,13 +1038,16 @@ func TestDetectAvailableProvidersCustomStillNeedsToolCall(t *testing.T) {
 	defer func() { envLookup = original }()
 	envLookup = func(string) string { return "" }
 
-	// "notools" has no tool_call models — custom ID should not bypass that check
-	available := DetectAvailableProviders(providers, "notools")
+	available := DetectAvailableProviders(providers, "lmstudio")
 
+	found := false
 	for _, id := range available {
-		if id == "notools" {
-			t.Fatal("notools should NOT be available even as custom (no tool_call models)")
+		if id == "lmstudio" {
+			found = true
 		}
+	}
+	if !found {
+		t.Fatalf("lmstudio should be available from config-defined model, got %v", available)
 	}
 }
 

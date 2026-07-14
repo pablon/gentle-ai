@@ -86,7 +86,11 @@ func NewModelPickerState(cachePath string, settingsPath string) ModelPickerState
 		return ModelPickerState{}
 	}
 
-	configProviders, configErr := opencode.LoadConfigProviders(settingsPath)
+	effectiveConfig, configErr := opencode.LoadEffectiveConfig(opencode.ConfigLoadOptions{
+		SettingsPath: settingsPath,
+		IncludeEnv:   true,
+	})
+	configProviders := effectiveConfig.Provider
 	if len(configProviders) > 0 {
 		providers = opencode.MergeCustomProviders(providers, configProviders)
 	}
@@ -107,7 +111,7 @@ func NewModelPickerState(cachePath string, settingsPath string) ModelPickerState
 
 	var configWarning string
 	if configErr != nil {
-		configWarning = fmt.Sprintf("Could not load custom providers from opencode.json: %v", configErr)
+		configWarning = fmt.Sprintf("Could not load custom providers from OpenCode config: %v", configErr)
 	}
 
 	return ModelPickerState{
@@ -666,9 +670,9 @@ func renderPhaseList(
 	}
 
 	if len(state.AvailableIDs) == 0 {
-		b.WriteString(styles.WarningStyle.Render("OpenCode has not been run yet — model cache not found."))
+		b.WriteString(styles.WarningStyle.Render("No OpenCode models are available yet."))
 		b.WriteString("\n")
-		b.WriteString(styles.SubtextStyle.Render("Run 'opencode' once, then re-run 'gentle-ai sync' to assign models."))
+		b.WriteString(styles.SubtextStyle.Render("Run 'opencode' once or add provider models to your OpenCode config."))
 		b.WriteString("\n")
 		b.WriteString(styles.SubtextStyle.Render("Using default model assignments for now."))
 		b.WriteString("\n\n")

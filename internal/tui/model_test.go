@@ -2370,6 +2370,39 @@ func TestModelConfig_OpenCodePickerNavigation(t *testing.T) {
 	}
 }
 
+func TestModelConfig_OpenCodePickerLoadsConfigProviderWithoutCache(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configDir := filepath.Join(home, ".config", "opencode")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(`{
+		"provider": {
+			"lmstudio": {
+				"name": "LM Studio",
+				"models": {"local-model": {"name": "Local Model"}}
+			}
+		}
+	}`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	m := NewModel(system.DetectionResult{}, "dev")
+	m.Screen = ScreenModelConfig
+	m.Cursor = 1
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	state := updated.(Model)
+
+	if state.Screen != ScreenModelPicker {
+		t.Fatalf("screen = %v, want ScreenModelPicker", state.Screen)
+	}
+	if len(state.ModelPicker.AvailableIDs) != 1 || state.ModelPicker.AvailableIDs[0] != "lmstudio" {
+		t.Fatalf("AvailableIDs = %v, want [lmstudio]", state.ModelPicker.AvailableIDs)
+	}
+}
+
 // TestModelConfig_BackNavigation verifies that selecting cursor 4 (Back) from
 // ScreenModelConfig returns to ScreenWelcome.
 // Index 3 is now "Configure Codex models"; Back moved to index 4.
@@ -6649,7 +6682,7 @@ func TestPickerFlowSlice(t *testing.T) {
 			},
 		},
 		{
-			name: "non-custom all agents SDDMode Multi cache absent excludes ModelPicker",
+			name: "non-custom all agents SDDMode Multi cache absent includes ModelPicker",
 			setup: func(t *testing.T) Model {
 				t.Setenv("HOME", t.TempDir()) // guarantees cache path resolves to missing file
 				m := NewModel(system.DetectionResult{}, "dev")
@@ -6665,6 +6698,7 @@ func TestPickerFlowSlice(t *testing.T) {
 				ScreenKiroModelPicker,
 				ScreenCodexModelPicker,
 				ScreenSDDMode,
+				ScreenModelPicker,
 				ScreenStrictTDD,
 				ScreenDependencyTree,
 			},

@@ -602,6 +602,9 @@ func tuiSync(homeDir string) tui.SyncFunc {
 		// preserves the user's previous choices instead of falling back
 		// to the "balanced" preset.
 		loadPersistedAssignments(homeDir, &selection)
+		if overrides == nil {
+			cli.PreserveCurrentOpenCodeModelAssignments(homeDir, &selection)
+		}
 
 		applyOverrides(&selection, overrides)
 

@@ -7,7 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
+
+// OpenCode may read both legacy config.* and opencode.* files. Merge legacy
+// files first, then opencode files, with JSONC overriding JSON in each family.
+var supportedConfigFilenames = []string{"config.json", "config.jsonc", "opencode.json", "opencode.jsonc"}
 
 // DefaultCachePath returns the default path to the OpenCode models cache file.
 func DefaultCachePath() string {
@@ -25,6 +30,74 @@ func DefaultSettingsPath() string {
 		return ""
 	}
 	return filepath.Join(home, ".config", "opencode", "opencode.json")
+}
+
+// ResolveConfigPath returns the existing OpenCode config path nearest to path.
+// If path does not exist, it searches the same directory for all supported
+// OpenCode config filenames.
+func ResolveConfigPath(path string) string {
+	if path == "" {
+		return path
+	}
+	if _, err := os.Stat(path); err == nil {
+		return path
+	}
+
+	dir := path
+	if filepath.Ext(path) != "" {
+		dir = filepath.Dir(path)
+	}
+	for _, name := range supportedConfigFilenames {
+		candidate := filepath.Join(dir, name)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return path
+}
+
+// ReadConfigFile reads an OpenCode config file, resolving supported fallback
+// filenames and sanitizing JSONC syntax before callers unmarshal it as JSON.
+func ReadConfigFile(path string) ([]byte, string, error) {
+	resolved := ResolveConfigPath(path)
+	data, err := os.ReadFile(resolved)
+	if err != nil {
+		return nil, resolved, err
+	}
+	return sanitizeJSONC(data), resolved, nil
+}
+
+// ReadConfigFiles reads every supported OpenCode config file in path's directory
+// using supportedConfigFilenames order. Missing directories/files return an
+// empty slice with nil error.
+func ReadConfigFiles(path string) ([]ConfigFile, error) {
+	if path == "" {
+		return nil, nil
+	}
+	dir := path
+	if filepath.Ext(path) != "" {
+		dir = filepath.Dir(path)
+	}
+
+	files := make([]ConfigFile, 0, len(supportedConfigFilenames))
+	for _, name := range supportedConfigFilenames {
+		candidate := filepath.Join(dir, name)
+		data, err := os.ReadFile(candidate)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, err
+		}
+		files = append(files, ConfigFile{Path: candidate, Data: sanitizeJSONC(data)})
+	}
+	return files, nil
+}
+
+// ConfigFile is a parsed OpenCode config file candidate.
+type ConfigFile struct {
+	Path string
+	Data []byte
 }
 
 // DefaultAuthPath returns the default path to the OpenCode auth credentials file.
@@ -325,38 +398,75 @@ type ConfigModel struct {
 	ToolCall bool   `json:"tool_call"`
 }
 
-// ConfigProvider represents a custom provider defined in opencode.json.
+// ConfigProvider represents a custom provider defined in OpenCode config.
 type ConfigProvider struct {
 	Name   string                 `json:"name"`
 	Models map[string]ConfigModel `json:"models"`
 }
 
-// LoadConfigProviders reads the provider section from an opencode.json settings file.
-// Returns an empty map with nil error if the file is missing or has no provider key.
-func LoadConfigProviders(path string) (map[string]ConfigProvider, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return map[string]ConfigProvider{}, nil
-		}
-		return map[string]ConfigProvider{}, err
-	}
-
-	var raw struct {
-		Provider map[string]ConfigProvider `json:"provider"`
-	}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return map[string]ConfigProvider{}, fmt.Errorf("parse opencode settings %q: %w", path, err)
-	}
-	if raw.Provider == nil {
-		return map[string]ConfigProvider{}, nil
-	}
-	return raw.Provider, nil
+// ConfigAgent represents only the agent fields Gentle AI needs to preserve.
+type ConfigAgent struct {
+	Model   string `json:"model"`
+	Variant string `json:"variant"`
 }
 
-// MergeCustomProviders merges custom providers from opencode.json into the cache-loaded
-// providers map. Custom models use the tool_call value from opencode.json, defaulting to false
-// when omitted. Custom entries win on ID collision (user-managed beats cached catalog).
+// EffectiveConfig contains the merged OpenCode config sections used by Gentle AI.
+// It intentionally excludes provider options and credentials.
+type EffectiveConfig struct {
+	Provider map[string]ConfigProvider
+	Agent    map[string]ConfigAgent
+}
+
+// LoadConfigProviders reads and merges provider sections from all OpenCode
+// config files in the same directory. Later files in supportedConfigFilenames
+// order override provider/model ID collisions. Production config selection should
+// use LoadEffectiveConfig so global, custom, project, and inline sources merge.
+// Returns an empty map with nil error if no supported file has a provider key.
+func LoadConfigProviders(path string) (map[string]ConfigProvider, error) {
+	files, err := ReadConfigFiles(path)
+	if err != nil {
+		return map[string]ConfigProvider{}, err
+	}
+	if len(files) == 0 {
+		return map[string]ConfigProvider{}, nil
+	}
+
+	merged := map[string]ConfigProvider{}
+	for _, file := range files {
+		var raw struct {
+			Provider map[string]ConfigProvider `json:"provider"`
+		}
+		if err := json.Unmarshal(file.Data, &raw); err != nil {
+			return map[string]ConfigProvider{}, fmt.Errorf("parse opencode settings %q: %w", file.Path, err)
+		}
+		for id, provider := range raw.Provider {
+			merged[id] = mergeConfigProvider(merged[id], provider)
+		}
+	}
+	return merged, nil
+}
+
+func mergeConfigProvider(base ConfigProvider, override ConfigProvider) ConfigProvider {
+	merged := base
+	if override.Name != "" {
+		merged.Name = override.Name
+	}
+	if len(base.Models) > 0 || len(override.Models) > 0 {
+		merged.Models = make(map[string]ConfigModel, len(base.Models)+len(override.Models))
+		for id, model := range base.Models {
+			merged.Models[id] = model
+		}
+		for id, model := range override.Models {
+			merged.Models[id] = model
+		}
+	}
+	return merged
+}
+
+// MergeCustomProviders merges custom providers from OpenCode config into the cache-loaded
+// providers map. Custom models are selectable by default because OpenCode config
+// does not require undocumented tool_call metadata. Custom entries win on ID collision
+// (user-managed beats cached catalog).
 // Returns the original providers map unchanged when config is empty; otherwise returns a
 // merged copy without mutating the input.
 func MergeCustomProviders(providers map[string]Provider, config map[string]ConfigProvider) map[string]Provider {
@@ -390,12 +500,118 @@ func MergeCustomProviders(providers map[string]Provider, config map[string]Confi
 			if name == "" {
 				name = mid
 			}
-			existing.Models[mid] = Model{ID: mid, Name: name, ToolCall: cm.ToolCall}
+			existing.Models[mid] = Model{ID: mid, Name: name, ToolCall: true}
 		}
 		merged[id] = existing
 	}
 
 	return merged
+}
+
+func stripJSONCComments(data []byte) []byte {
+	return sanitizeJSONC(data)
+}
+
+func sanitizeJSONC(data []byte) []byte {
+	return stripJSONCTrailingCommas(stripJSONCCommentsOnly(data))
+}
+
+func stripJSONCCommentsOnly(data []byte) []byte {
+	s := string(data)
+	var b strings.Builder
+	b.Grow(len(s))
+	inString := false
+	escaped := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inString {
+			b.WriteByte(c)
+			if escaped {
+				escaped = false
+				continue
+			}
+			if c == '\\' {
+				escaped = true
+				continue
+			}
+			if c == '"' {
+				inString = false
+			}
+			continue
+		}
+		if c == '"' {
+			inString = true
+			b.WriteByte(c)
+			continue
+		}
+		if c == '/' && i+1 < len(s) {
+			next := s[i+1]
+			if next == '/' {
+				for i < len(s) && s[i] != '\n' {
+					i++
+				}
+				if i < len(s) {
+					b.WriteByte(s[i])
+				}
+				continue
+			}
+			if next == '*' {
+				i += 2
+				for i+1 < len(s) && !(s[i] == '*' && s[i+1] == '/') {
+					if s[i] == '\n' {
+						b.WriteByte('\n')
+					}
+					i++
+				}
+				i++
+				continue
+			}
+		}
+		b.WriteByte(c)
+	}
+	return []byte(b.String())
+}
+
+func stripJSONCTrailingCommas(data []byte) []byte {
+	s := string(data)
+	var b strings.Builder
+	b.Grow(len(s))
+	inString := false
+	escaped := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inString {
+			b.WriteByte(c)
+			if escaped {
+				escaped = false
+				continue
+			}
+			if c == '\\' {
+				escaped = true
+				continue
+			}
+			if c == '"' {
+				inString = false
+			}
+			continue
+		}
+		if c == '"' {
+			inString = true
+			b.WriteByte(c)
+			continue
+		}
+		if c == ',' {
+			j := i + 1
+			for j < len(s) && (s[j] == ' ' || s[j] == '\t' || s[j] == '\r' || s[j] == '\n') {
+				j++
+			}
+			if j < len(s) && (s[j] == '}' || s[j] == ']') {
+				continue
+			}
+		}
+		b.WriteByte(c)
+	}
+	return []byte(b.String())
 }
 
 // SDDPhases returns the ordered list of SDD phase sub-agent names.

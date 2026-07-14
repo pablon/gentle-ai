@@ -1,9 +1,6 @@
 package sdd
 
 import (
-	"os"
-
-	"github.com/gentleman-programming/gentle-ai/internal/components/filemerge"
 	"github.com/gentleman-programming/gentle-ai/internal/model"
 	"github.com/gentleman-programming/gentle-ai/internal/opencode"
 )
@@ -42,40 +39,24 @@ func ReadCurrentProfiles(settingsPath string) ([]model.Profile, error) {
 // Returns an empty map (no error) when the file does not exist, contains no
 // "agent" key, or has no matching phase agents with a valid model field.
 func ReadCurrentModelAssignments(settingsPath string) (map[string]model.ModelAssignment, error) {
-	data, err := os.ReadFile(settingsPath)
+	effectiveConfig, err := opencode.LoadEffectiveConfig(opencode.ConfigLoadOptions{
+		SettingsPath: settingsPath,
+		IncludeEnv:   true,
+	})
 	if err != nil {
-		if os.IsNotExist(err) {
-			return map[string]model.ModelAssignment{}, nil
-		}
 		return nil, err
 	}
-
-	root, err := filemerge.UnmarshalJSONObject(data)
-	if err != nil {
-		// Unparseable JSON — return empty map, no error.
-		return map[string]model.ModelAssignment{}, nil
-	}
-
-	agentRaw, ok := root["agent"]
-	if !ok {
-		return map[string]model.ModelAssignment{}, nil
-	}
-	agentMap, ok := agentRaw.(map[string]any)
-	if !ok {
+	if len(effectiveConfig.Agent) == 0 {
 		return map[string]model.ModelAssignment{}, nil
 	}
 
 	result := make(map[string]model.ModelAssignment)
-	for name, defRaw := range agentMap {
+	for name, def := range effectiveConfig.Agent {
 		if !configurableAgentSet[name] {
 			continue
 		}
-		defMap, ok := defRaw.(map[string]any)
-		if !ok {
-			continue
-		}
-		modelStr, ok := defMap["model"].(string)
-		if !ok || modelStr == "" {
+		modelStr := def.Model
+		if modelStr == "" {
 			continue
 		}
 		providerID, modelID, ok := model.SplitModelSpec(modelStr)
@@ -89,11 +70,10 @@ func ReadCurrentModelAssignments(settingsPath string) (map[string]model.ModelAss
 				continue
 			}
 		}
-		effort, _ := defMap["variant"].(string)
 		result[assignmentKey] = model.ModelAssignment{
 			ProviderID: providerID,
 			ModelID:    modelID,
-			Effort:     effort,
+			Effort:     def.Variant,
 		}
 	}
 

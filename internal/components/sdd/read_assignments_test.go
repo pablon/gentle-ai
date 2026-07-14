@@ -100,6 +100,59 @@ func TestReadCurrentModelAssignmentsNoFile(t *testing.T) {
 	}
 }
 
+func TestReadCurrentModelAssignmentsSupportedFallbackFilenamesAndJSONC(t *testing.T) {
+	dir := t.TempDir()
+	settingsPath := filepath.Join(dir, "config.jsonc")
+	content := `{
+		// OpenCode also supports config.jsonc.
+		"agent": {
+			"sdd-apply": { "model": "lmstudio/local-model" }
+		}
+	}`
+	if err := os.WriteFile(settingsPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
+
+	got, err := ReadCurrentModelAssignments(filepath.Join(dir, "opencode.json"))
+	if err != nil {
+		t.Fatalf("ReadCurrentModelAssignments() error = %v", err)
+	}
+	want := model.ModelAssignment{ProviderID: "lmstudio", ModelID: "local-model"}
+	if got["sdd-apply"] != want {
+		t.Fatalf("sdd-apply assignment = %+v, want %+v", got["sdd-apply"], want)
+	}
+}
+
+func TestReadCurrentModelAssignmentsMergesSupportedFilesWithPrecedence(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{
+		"agent": {
+			"sdd-apply": { "model": "legacy/apply-model" },
+			"sdd-verify": { "model": "legacy/verify-model" }
+		}
+	}`), 0o644); err != nil {
+		t.Fatalf("write config.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(`{
+		"agent": {
+			"sdd-apply": { "model": "opencode/apply-model", "variant": "high" }
+		}
+	}`), 0o644); err != nil {
+		t.Fatalf("write opencode.json: %v", err)
+	}
+
+	got, err := ReadCurrentModelAssignments(filepath.Join(dir, "opencode.json"))
+	if err != nil {
+		t.Fatalf("ReadCurrentModelAssignments() error = %v", err)
+	}
+	if got["sdd-apply"] != (model.ModelAssignment{ProviderID: "opencode", ModelID: "apply-model", Effort: "high"}) {
+		t.Fatalf("sdd-apply assignment = %+v, want opencode override", got["sdd-apply"])
+	}
+	if got["sdd-verify"] != (model.ModelAssignment{ProviderID: "legacy", ModelID: "verify-model"}) {
+		t.Fatalf("sdd-verify assignment = %+v, want legacy assignment preserved", got["sdd-verify"])
+	}
+}
+
 func TestReadCurrentModelAssignmentsMapsLegacyOrchestratorToGentleOrchestrator(t *testing.T) {
 	dir := t.TempDir()
 	settingsPath := filepath.Join(dir, "opencode.json")
@@ -213,16 +266,16 @@ func TestReadCurrentModelAssignmentsMalformedModelField(t *testing.T) {
 	}
 }
 
-// TestReadCurrentModelAssignmentsSlashSeparator verifies that custom provider
-// models using slash format ("provider/model-id") are parsed correctly.
-// Issue #152: OpenCode uses "zai-coding-plan/glm-5-turbo" for custom providers.
+// TestReadCurrentModelAssignmentsSlashSeparator verifies that OpenCode models
+// using slash format ("provider/model-id") are parsed correctly.
 func TestReadCurrentModelAssignmentsSlashSeparator(t *testing.T) {
 	dir := t.TempDir()
 	settingsPath := filepath.Join(dir, "opencode.json")
 
 	content := `{
   "agent": {
-    "gentle-orchestrator": { "model": "zai-coding-plan/glm-5-turbo" }
+	"gentle-orchestrator": { "model": "zai-coding-plan/glm-5-turbo" },
+	"sdd-apply": { "model": "openrouter/qwen/qwen3.6-plus:free" }
   }
 }`
 	if err := os.WriteFile(settingsPath, []byte(content), 0o644); err != nil {
@@ -234,15 +287,27 @@ func TestReadCurrentModelAssignmentsSlashSeparator(t *testing.T) {
 		t.Fatalf("ReadCurrentModelAssignments() error = %v", err)
 	}
 
-	a, ok := got["gentle-orchestrator"]
-	if !ok {
-		t.Fatal("gentle-orchestrator missing from result — slash-separated format not parsed")
+	tests := []struct {
+		phase      string
+		providerID string
+		modelID    string
+	}{
+		{"gentle-orchestrator", "zai-coding-plan", "glm-5-turbo"},
+		{"sdd-apply", "openrouter", "qwen/qwen3.6-plus:free"},
 	}
-	if a.ProviderID != "zai-coding-plan" {
-		t.Errorf("ProviderID = %q, want %q", a.ProviderID, "zai-coding-plan")
-	}
-	if a.ModelID != "glm-5-turbo" {
-		t.Errorf("ModelID = %q, want %q", a.ModelID, "glm-5-turbo")
+
+	for _, tt := range tests {
+		a, ok := got[tt.phase]
+		if !ok {
+			t.Errorf("phase %q missing from result", tt.phase)
+			continue
+		}
+		if a.ProviderID != tt.providerID {
+			t.Errorf("phase %q: ProviderID = %q, want %q", tt.phase, a.ProviderID, tt.providerID)
+		}
+		if a.ModelID != tt.modelID {
+			t.Errorf("phase %q: ModelID = %q, want %q", tt.phase, a.ModelID, tt.modelID)
+		}
 	}
 }
 

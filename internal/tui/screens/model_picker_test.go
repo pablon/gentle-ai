@@ -1028,16 +1028,17 @@ func TestNewModelPickerState(t *testing.T) {
 			name:         "opencode.json with 2 custom providers adds both to picker",
 			cacheContent: catalogJSON,
 			settingsContent: `{
+				// OpenCode JSONC examples allow comments and trailing commas.
 				"provider": {
 					"custom-a": {
 						"name": "Custom A",
-						"models": {"model-a1": {"name": "Model A1", "tool_call": true}}
+						"models": {"model-a1": {"name": "Model A1", "tool_call": true}},
 					},
 					"custom-b": {
 						"name": "Custom B",
-						"models": {"model-b1": {"name": "Model B1", "tool_call": true}}
-					}
-				}
+						"models": {"model-b1": {"name": "Model B1", "tool_call": true}},
+					},
+				},
 			}`,
 			wantProviderIDs:   []string{"built-in", "custom-a", "custom-b"},
 			wantAvailable:     2, // custom-a and custom-b are always available as custom providers
@@ -1106,6 +1107,85 @@ func TestNewModelPickerState(t *testing.T) {
 				t.Errorf("expected no ConfigWarning, got %q", state.ConfigWarning)
 			}
 		})
+	}
+}
+
+func TestNewModelPickerStateUsesConfigProvidersWhenCacheMissing(t *testing.T) {
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "missing-models.json")
+	settingsPath := filepath.Join(dir, "config.jsonc")
+	if err := os.WriteFile(settingsPath, []byte(`{
+		// Custom provider should work without a models cache.
+		"provider": {
+			"lmstudio": {
+				"name": "LM Studio",
+				"models": {
+					"local-model": {"name": "Local Model"},
+				},
+			},
+		},
+	}`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	state := NewModelPickerState(cachePath, filepath.Join(dir, "opencode.json"))
+
+	if len(state.AvailableIDs) != 1 || state.AvailableIDs[0] != "lmstudio" {
+		t.Fatalf("AvailableIDs = %v, want [lmstudio]", state.AvailableIDs)
+	}
+	models := state.SDDModels["lmstudio"]
+	if len(models) != 1 || models[0].ID != "local-model" {
+		t.Fatalf("SDDModels[lmstudio] = %+v, want local-model", models)
+	}
+}
+
+func TestNewModelPickerStateIncludesConfigJSONProvidersWhenOpenCodeJSONExists(t *testing.T) {
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "missing-models.json")
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{
+		"provider": {
+			"test-local-provider-1": {
+				"name": "Test Local Provider 1",
+				"models": {"neuro-model": {"name": "Neuro Model"}}
+			},
+			"test-local-provider-2": {
+				"name": "Test Local Provider 2",
+				"models": {"qwen-local": {"name": "Qwen Local"}}
+			}
+		}
+	}`), 0o644); err != nil {
+		t.Fatalf("write config.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(`{
+		"provider": {
+			"ollama": {
+				"name": "Ollama",
+				"models": {"llama-local": {"name": "Llama Local"}}
+			}
+		}
+	}`), 0o644); err != nil {
+		t.Fatalf("write opencode.json: %v", err)
+	}
+
+	state := NewModelPickerState(cachePath, filepath.Join(dir, "opencode.json"))
+
+	want := []string{"test-local-provider-1", "test-local-provider-2", "ollama"}
+	for _, id := range want {
+		if _, ok := state.Providers[id]; !ok {
+			t.Fatalf("Providers missing %q; got keys: %v", id, providerKeys(state.Providers))
+		}
+	}
+	for _, id := range want {
+		found := false
+		for _, available := range state.AvailableIDs {
+			if available == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("AvailableIDs missing %q; got %v", id, state.AvailableIDs)
+		}
 	}
 }
 

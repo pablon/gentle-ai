@@ -1162,6 +1162,29 @@ func applyResolvedPersona(selection *model.Selection, persisted string) {
 	selection.Persona = model.PersonaNeutral
 }
 
+// PreserveCurrentOpenCodeModelAssignments keeps the current OpenCode config as
+// the source of truth for OpenCode agent model assignments during plain syncs.
+// Explicit model-picker overrides should call sync without this reconciliation.
+func PreserveCurrentOpenCodeModelAssignments(homeDir string, selection *model.Selection) {
+	if selection == nil || !selection.HasAgent(model.AgentOpenCode) || !selection.HasComponent(model.ComponentSDD) {
+		return
+	}
+	for _, adapter := range resolveAdapters(selection.Agents) {
+		if adapter.Agent() != model.AgentOpenCode {
+			continue
+		}
+		settingsPath := adapter.SettingsPath(homeDir)
+		if settingsPath == "" {
+			return
+		}
+		current, err := sdd.ReadCurrentModelAssignments(settingsPath)
+		if err == nil && len(current) > 0 {
+			selection.ModelAssignments = current
+		}
+		return
+	}
+}
+
 // RunSyncWithSelection is the programmatic entry point for sync.
 // It skips flag parsing and agent discovery — the caller provides the homeDir
 // and a fully-built Selection (agents + components + options).
@@ -1345,6 +1368,7 @@ func RunSync(args []string) (SyncResult, error) {
 		}
 		selection.CodexPhaseModelAssignments = m
 	}
+	PreserveCurrentOpenCodeModelAssignments(homeDir, &selection)
 
 	// Resolve persona from the already-read state. This covers both the dry-run
 	// branch (which returns early) and the normal path (which delegates to

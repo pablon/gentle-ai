@@ -2986,6 +2986,47 @@ func TestRunSyncLoadsPersistedModelAssignmentsPreservesEffort(t *testing.T) {
 	}
 }
 
+func TestRunSyncPreservesCurrentOpenCodeAssignmentsOverStaleState(t *testing.T) {
+	home := t.TempDir()
+	setSyncTestHome(t, home)
+
+	configDir := filepath.Join(home, ".config", "opencode")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.jsonc"), []byte(`{
+		"provider": {
+			"lmstudio": {
+				"name": "LM Studio",
+				"models": {"local-model": {"name": "Local Model"}}
+			}
+		},
+		"agent": {
+			"sdd-apply": {"model": "lmstudio/local-model"}
+		}
+	}`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if err := state.Write(home, state.InstallState{
+		InstalledAgents: []string{"opencode"},
+		ModelAssignments: map[string]state.ModelAssignmentState{
+			"sdd-apply": {ProviderID: "anthropic", ModelID: "stale-model"},
+		},
+	}); err != nil {
+		t.Fatalf("state.Write: %v", err)
+	}
+
+	result, err := RunSync([]string{"--agents", "opencode", "--sdd-mode", "single", "--dry-run"})
+	if err != nil {
+		t.Fatalf("RunSync() error = %v", err)
+	}
+
+	assignment := result.Selection.ModelAssignments["sdd-apply"]
+	if assignment.ProviderID != "lmstudio" || assignment.ModelID != "local-model" {
+		t.Fatalf("ModelAssignments[sdd-apply] = %+v, want lmstudio/local-model", assignment)
+	}
+}
+
 // TestRunSyncDoesNotOverridePersistedAssignmentsOnSecondSync verifies the
 // full cycle: sync1 loads persisted assignments → sync2 still has them.
 // This is the core promise of the fix.

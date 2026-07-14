@@ -2886,6 +2886,53 @@ func TestInjectOpenCodeMultiModeWithModelAssignments(t *testing.T) {
 	}
 }
 
+func TestInjectOpenCodeMultiModePreservesProviderConfigWithCustomAssignment(t *testing.T) {
+	mockNoPackageManager(t)
+	home := t.TempDir()
+	settingsPath := filepath.Join(home, ".config", "opencode", "opencode.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(settingsPath, []byte(`{
+		"provider": {
+			"lmstudio": {
+				"name": "LM Studio",
+				"models": {"local-model": {"name": "Local Model"}}
+			}
+		}
+	}`), 0o644); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
+
+	assignments := map[string]model.ModelAssignment{
+		"sdd-apply": {ProviderID: "lmstudio", ModelID: "local-model"},
+	}
+	if _, err := Inject(home, opencodeAdapter(), "multi", InjectOptions{OpenCodeModelAssignments: assignments}); err != nil {
+		t.Fatalf("Inject(multi, assignments) error = %v", err)
+	}
+
+	content, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("ReadFile(opencode.json) error = %v", err)
+	}
+	root := map[string]any{}
+	if err := json.Unmarshal(content, &root); err != nil {
+		t.Fatalf("Unmarshal(opencode.json) error = %v", err)
+	}
+	providerMap, ok := root["provider"].(map[string]any)
+	if !ok {
+		t.Fatal("provider block was removed")
+	}
+	if _, ok := providerMap["lmstudio"]; !ok {
+		t.Fatal("lmstudio provider was removed")
+	}
+	agentMap := root["agent"].(map[string]any)
+	applyAgent := agentMap["sdd-apply"].(map[string]any)
+	if got := applyAgent["model"]; got != "lmstudio/local-model" {
+		t.Fatalf("sdd-apply model = %q, want lmstudio/local-model", got)
+	}
+}
+
 func TestInjectOpenCodeMultiModeNoAssignmentsNoModel(t *testing.T) {
 	mockNoPackageManager(t)
 	home := t.TempDir()
